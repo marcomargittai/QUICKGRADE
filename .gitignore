@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+DerivedData/
+build/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Release output
+*.dmg
+dist/
+
+# Secrets
+.env
+.env.*
+*.p12
+*.cer
+*.mobileprovision
+AuthKey_*.p8
