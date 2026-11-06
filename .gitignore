@@ -28,3 +28,8 @@ dist/
 *.cer
 *.mobileprovision
 AuthKey_*.p8
+
+# Local app bundle built by scripts/run.sh
+QuickGrade.app
+.derivedData/
+*.xcuserstate
