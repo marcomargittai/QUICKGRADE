@@ -11,9 +11,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>OpenLook</string>
+	<string>QuickGrade</string>
 	<key>CFBundleDisplayName</key>
-	<string>OpenLook</string>
+	<string>QuickGrade</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
@@ -29,8 +29,8 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>OpenLook uses Accessibility to see when you press Space on a photo in Finder, so it can open the grading shelf.</string>
+	<string>QuickGrade uses Accessibility to see when you press Space on a photo in Finder, so it can open the grading shelf.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>OpenLook asks Finder which photo is selected when you press Space.</string>
+	<string>QuickGrade asks Finder which photo is selected when you press Space.</string>
 </dict>
 </plist>

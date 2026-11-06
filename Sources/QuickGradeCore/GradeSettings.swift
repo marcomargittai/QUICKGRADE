@@ -545,7 +545,7 @@ public enum ImageKind {
 
     public static let shelfExtensions: Set<String> = ["jpg", "jpeg", "jpe", "jfif", "png"]
 
-    /// Space opens OpenLook only for JPEG and PNG. Every other file keeps Quick Look.
+    /// Space opens QuickGrade only for JPEG and PNG. Every other file keeps Quick Look.
     public static func opensInShelf(_ url: URL) -> Bool {
         shelfExtensions.contains(url.pathExtension.lowercased())
     }

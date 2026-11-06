@@ -124,7 +124,7 @@ struct MenuContent: View {
             model.toggleLogin()
         }
         Divider()
-        Button("Quit OpenLook") { NSApp.terminate(nil) }
+        Button("Quit QuickGrade") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 }

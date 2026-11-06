@@ -30,8 +30,6 @@ QuickGrade
    On older macOS you can also Control-click the app, choose Open, then Open.
 4. Allow Accessibility when asked. QuickGrade needs that to see Space in Finder.
 5. Select a photo in Finder and press Space.
-
-The menu bar name is OpenLook. That is the same app.
 NOTE
 
 rm -f "$ZIP"
