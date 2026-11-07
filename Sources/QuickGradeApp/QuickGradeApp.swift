@@ -13,7 +13,23 @@ final class AppModel {
         opensAtLogin = SMAppService.mainApp.status == .enabled
     }
 
+    /// A switch left on for an older build of QuickGrade looks on in System Settings
+    /// but no longer matches this app, so macOS keeps saying no. Clearing QuickGrade's own
+    /// entry first means the prompt adds a fresh one, and one flip of the switch works.
     func requestAccess() {
+        guard !AXIsProcessTrusted() else {
+            refresh()
+            return
+        }
+        if let id = Bundle.main.bundleIdentifier {
+            let reset = Process()
+            reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            reset.arguments = ["reset", "Accessibility", id]
+            reset.standardOutput = FileHandle.nullDevice
+            reset.standardError = FileHandle.nullDevice
+            try? reset.run()
+            reset.waitUntilExit()
+        }
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         SpaceMonitor.shared.start()
