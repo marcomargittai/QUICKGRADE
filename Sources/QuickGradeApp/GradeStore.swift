@@ -119,6 +119,19 @@ enum GradeStore {
         }
     }
 
+    /// Moves the grade, the stashed original and the icon mark to a renamed file.
+    static func move(from old: URL, to new: URL) {
+        let pairs = [
+            (storeURL(for: old), storeURL(for: new)),
+            (originalFileURL(for: old), originalFileURL(for: new)),
+            (iconMarkURL(for: old), iconMarkURL(for: new))
+        ]
+        for (from, to) in pairs where FileManager.default.fileExists(atPath: from.path) {
+            try? FileManager.default.removeItem(at: to)
+            try? FileManager.default.moveItem(at: from, to: to)
+        }
+    }
+
     private static func storeURL(for file: URL) -> URL {
         let folder = directory()
         return folder.appendingPathComponent(key(for: file)).appendingPathExtension("json")

@@ -28,6 +28,7 @@ final class GradeSession {
     var markupSize: MarkupSize = .medium
     var erasingMarkup = false
     var isFullScreen = false
+    var renaming = false
     var sourceAspect: CGFloat = 1
     var cropInteracting = false {
         didSet {
@@ -44,7 +45,6 @@ final class GradeSession {
     var cropFrame = CGRect(x: 0, y: 0, width: 1, height: 1)
     var cropViewSize = CGSize(width: 1, height: 1)
     var fileName = ""
-    var positionText: String?
     var canGoBack = false
     var canGoForward = false
     var canUndo = false
@@ -73,6 +73,7 @@ final class GradeSession {
     var performClose: () -> Void = {}
     var performCopyImage: () -> Void = {}
     var performToggleFullScreen: () -> Void = {}
+    var performRename: (String) -> Void = { _ in }
 
     private var editBaseline: GradeSettings?
     private var editAction: String?
@@ -255,6 +256,10 @@ final class GradeSession {
         let before = settings
         settings.markup = []
         commit(from: before, action: "Clear Drawing")
+    }
+
+    func rename(to name: String) {
+        performRename(name)
     }
 
     func toggleFullScreen() {

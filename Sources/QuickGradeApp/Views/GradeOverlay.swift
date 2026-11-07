@@ -100,28 +100,16 @@ struct GradeOverlay: View {
 
     private var topBar: some View {
         HStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Text(session.fileName)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.9))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if session.isDirty {
-                    Circle()
-                        .fill(Color.white.opacity(0.92))
-                        .frame(width: 6, height: 6)
-                        .modifier(HoverTip(title: "Edited. Your changes are kept.", shortcut: nil, alignment: .topLeading))
-                }
-                if let position = session.positionText {
-                    Text(position)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.white.opacity(0.5))
-                        .fixedSize()
-                }
-            }
-            .layoutPriority(-1)
-            Spacer(minLength: 12)
+            WindowLights(
+                fullScreen: session.isFullScreen,
+                onClose: { session.close() },
+                onFullScreen: { session.toggleFullScreen() }
+            )
+            .padding(.trailing, 6)
+            Spacer(minLength: 8)
+            FileTitle(session: session)
+                .layoutPriority(-1)
+            Spacer(minLength: 8)
 
             ToolbarButton(symbol: "crop", title: "Crop & Straighten", shortcut: "C", on: session.cropping) {
                 session.toggleCrop()
@@ -138,18 +126,7 @@ struct GradeOverlay: View {
                 session.redo()
             }
             separator
-            ToolbarButton(
-                symbol: session.isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                title: session.isFullScreen ? "Exit Full Screen" : "Full Screen",
-                shortcut: "F",
-                tipAlignment: .topTrailing
-            ) {
-                session.toggleFullScreen()
-            }
             optionsMenu
-            ToolbarButton(symbol: "xmark", title: "Close", shortcut: "Space", tipAlignment: .topTrailing) {
-                session.close()
-            }
         }
     }
 

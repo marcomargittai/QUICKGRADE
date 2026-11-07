@@ -81,9 +81,8 @@ final class GradeController: NSObject, NSWindowDelegate {
     private var lastCropping = false
     private var lastClipping = false
     private var windowedFrame: NSRect?
-    private var layout = FinderLayout.rows
-    private var layoutFolder: URL?
-    private var layoutAt = Date.distantPast
+    private var finderView: FinderView?
+    private var stepping = false
     private var lastArrowAt = Date.distantPast
 
     private override init() {
@@ -92,7 +91,8 @@ final class GradeController: NSObject, NSWindowDelegate {
             self?.scheduleRender()
             self?.schedulePersist()
         }
-        session.performGo = { [weak self] delta in self?.go(by: delta) }
+        session.performGo = { [weak self] delta in self?.step(delta < 0 ? .left : .right) }
+        session.performRename = { [weak self] name in self?.rename(to: name) }
         session.performSave = { [weak self] in self?.save() }
         session.performClose = { [weak self] in self?.close() }
         session.performCopyImage = { [weak self] in self?.copyImage() }
@@ -102,6 +102,8 @@ final class GradeController: NSObject, NSWindowDelegate {
     func spaceAction() -> SpaceAction {
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let mine = Bundle.main.bundleIdentifier
+        // Space is a character while the name is being edited.
+        if session.renaming, panel?.isKeyWindow == true { return .ignore }
         if let panel, panel.isVisible, !closing {
             if panel.isKeyWindow || front == "com.apple.finder" || front == mine {
                 return .close
@@ -161,7 +163,7 @@ final class GradeController: NSObject, NSWindowDelegate {
             }
         }
         show(current, keepGrade: keepGrade)
-        refreshLayout(for: current.deletingLastPathComponent())
+        refreshFinderView()
     }
 
     func appResigned() {
@@ -220,6 +222,7 @@ final class GradeController: NSObject, NSWindowDelegate {
         session.cropping = false
         session.cropFrame = session.settings.crop.rect
         session.drawing = false
+        session.renaming = false
         if !session.settings.isNeutral {
             refreshFinderIcon(url)
         }
@@ -473,7 +476,7 @@ final class GradeController: NSObject, NSWindowDelegate {
     }
 
     func historyKey(redo: Bool) -> Bool {
-        guard let panel, panel.isVisible, !closing else { return false }
+        guard let panel, panel.isVisible, !closing, !session.renaming else { return false }
         if redo { session.redo() } else { session.undo() }
         return true
     }
@@ -639,15 +642,9 @@ final class GradeController: NSObject, NSWindowDelegate {
     }
 
     private func syncChrome() {
-        if urls.count > 1 {
-            session.positionText = "\(index + 1) / \(urls.count)"
-            session.canGoBack = index > 0
-            session.canGoForward = index < urls.count - 1
-        } else {
-            session.positionText = nil
-            session.canGoBack = false
-            session.canGoForward = false
-        }
+        // Finder decides what comes next, so both directions stay available.
+        session.canGoBack = true
+        session.canGoForward = true
         session.canPaste = GradeClipboard.settings != nil
     }
 
@@ -811,6 +808,8 @@ final class GradeController: NSObject, NSWindowDelegate {
     }
 
     private func handleKey(_ event: NSEvent) -> Bool {
+        // The name field takes every key while it is open.
+        if session.renaming { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let command = flags.contains(.command)
         let shift = flags.contains(.shift)
@@ -831,12 +830,7 @@ final class GradeController: NSObject, NSWindowDelegate {
         if plain, let arrow = Arrow(rawValue: event.keyCode) {
             if event.isARepeat, Date().timeIntervalSince(lastArrowAt) < 0.09 { return true }
             lastArrowAt = Date()
-            switch arrow {
-            case .left: go(by: -1)
-            case .right: go(by: 1)
-            case .up: goVertical(down: false)
-            case .down: goVertical(down: true)
-            }
+            step(arrow)
             return true
         }
         guard !event.isARepeat else { return false }
@@ -914,47 +908,114 @@ final class GradeController: NSObject, NSWindowDelegate {
         case right = 124
         case down = 125
         case up = 126
+
+        /// Up or down, for Finder views that list one file per row.
+        var finderKeyForRows: CGKeyCode {
+            self == .left ? CGKeyCode(Arrow.up.rawValue) : CGKeyCode(Arrow.down.rawValue)
+        }
     }
 
-    /// Up and down follow Finder. Icon view moves to the photo above or below,
-    /// list, column and gallery view move one photo like left and right.
-    private func goVertical(down: Bool) {
-        guard urls.indices.contains(index) else { return }
-        let folder = urls[index].deletingLastPathComponent()
-        if Date().timeIntervalSince(layoutAt) > 3 { refreshLayout(for: folder) }
-        guard case .grid(let spots) = layout,
-              layoutFolder?.path == folder.path,
-              let here = spots[urls[index].lastPathComponent] else {
-            go(by: down ? 1 : -1)
+    /// Arrows move Finder's own selection, then the shelf shows what Finder picked.
+    /// The order and layout are always Finder's: its sort, its view, its columns.
+    /// List and column view treat left and right as up and down, since those keys
+    /// fold folders there. Anything that isn't a JPEG or PNG is stepped over.
+    private func step(_ arrow: Arrow, hops: Int = 0) {
+        guard !stepping || hops > 0 else { return }
+        guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first,
+              let shown = sourceURL else {
+            go(by: arrow == .left || arrow == .up ? -1 : 1)
             return
         }
-        let tolerance: CGFloat = 4
-        var candidates: [(index: Int, spot: CGPoint)] = []
-        for (position, url) in urls.enumerated() {
-            guard let spot = spots[url.lastPathComponent] else { continue }
-            let beyond = down ? spot.y > here.y + tolerance : spot.y < here.y - tolerance
-            if beyond { candidates.append((position, spot)) }
-        }
-        let rowY = down ? candidates.map(\.spot.y).min() : candidates.map(\.spot.y).max()
-        guard let rowY else { return }
-        let best = candidates
-            .filter { abs($0.spot.y - rowY) <= tolerance }
-            .min { abs($0.spot.x - here.x) < abs($1.spot.x - here.x) }
-        guard let best else { return }
-        go(by: best.index - index)
-    }
-
-    private func refreshLayout(for folder: URL) {
-        layoutAt = Date()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Finder's front window must show this folder, or its grid says nothing about these photos.
-            guard FinderSelection.frontWindowFolder()?.path == folder.path else { return }
-            let next = FinderSelection.frontWindowLayout()
+        stepping = true
+        let key = finderKey(for: arrow)
+        let source = CGEventSource(stateID: .hidSystemState)
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            let start = FinderSelection.highlightedFile() ?? shown
+            CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true)?.postToPid(finder.processIdentifier)
+            CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false)?.postToPid(finder.processIdentifier)
+            var landed: URL?
+            for _ in 0..<20 {
+                usleep(15_000)
+                landed = FinderSelection.highlightedFile()
+                if let landed, landed.path != start.path { break }
+            }
             DispatchQueue.main.async {
-                self?.layout = next
-                self?.layoutFolder = folder
+                guard let self else { return }
+                guard let landed, landed.path != start.path else {
+                    // Finder didn't move: the end of the list, or Finder isn't showing a folder.
+                    self.stepping = false
+                    if hops > 0 {
+                        self.session.flash("No more photos this way")
+                        FinderSelection.reselectIfNeeded(shown)
+                    } else if FinderSelection.highlightedFile() == nil {
+                        self.go(by: arrow == .left || arrow == .up ? -1 : 1)
+                    }
+                    return
+                }
+                if ImageKind.opensInShelf(landed) {
+                    self.stepping = false
+                    guard landed.path != shown.path else { return }
+                    self.open(urls: [landed])
+                } else if hops < 60 {
+                    self.step(arrow, hops: hops + 1)
+                } else {
+                    self.stepping = false
+                    FinderSelection.reselectIfNeeded(shown)
+                }
             }
         }
+    }
+
+    private func finderKey(for arrow: Arrow) -> CGKeyCode {
+        switch (finderView, arrow) {
+        case (.list?, .left), (.column?, .left), (.gallery?, .up): return Arrow.left.finderKeyForRows
+        case (.list?, .right), (.column?, .right), (.gallery?, .down): return Arrow.right.finderKeyForRows
+        default: return CGKeyCode(arrow.rawValue)
+        }
+    }
+
+    private func refreshFinderView() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let view = FinderSelection.frontWindowView()
+            DispatchQueue.main.async { self?.finderView = view }
+        }
+    }
+
+    /// Renames the file in place and carries its grade, original and icon along.
+    private func rename(to typed: String) {
+        guard let url = sourceURL else { return }
+        var name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != url.lastPathComponent else { return }
+        guard !name.contains("/"), !name.contains(":"), !name.hasPrefix(".") else {
+            session.flash("A name can't contain / or : or start with a dot")
+            return
+        }
+        let ext = url.pathExtension
+        if !ext.isEmpty, (name as NSString).pathExtension.lowercased() != ext.lowercased() {
+            name += "." + ext
+        }
+        let destination = url.deletingLastPathComponent().appendingPathComponent(name)
+        let caseOnly = destination.path.lowercased() == url.path.lowercased()
+        if !caseOnly, FileManager.default.fileExists(atPath: destination.path) {
+            session.flash("“\(name)” already exists")
+            return
+        }
+        saveTask?.cancel()
+        GradeStore.save(session.settings, for: url)
+        iconTasks[url.path]?.cancel()
+        iconTokens[url.path, default: 0] += 1
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            session.flash("Couldn't rename this photo")
+            return
+        }
+        GradeStore.move(from: url, to: destination)
+        sourceURL = destination
+        if urls.indices.contains(index) { urls[index] = destination }
+        session.fileName = destination.lastPathComponent
+        SelectionCache.shared.note([destination])
+        session.flash("Renamed")
     }
 
     /// Fills the screen above the menu bar and Dock, like Quick Look's full screen,
