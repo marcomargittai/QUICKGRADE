@@ -22,6 +22,7 @@ struct ToolbarButton: View {
     }
 }
 
+/// Plain grey symbol, as in Preview's toolbar. A soft plate shows on hover and while a tool is on.
 struct ToolbarGlyph: View {
     let symbol: String
     var on = false
@@ -30,14 +31,14 @@ struct ToolbarGlyph: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(on ? Color.black : Color.white.opacity(enabled ? 0.92 : 0.28))
-            .frame(width: 30, height: 30)
+            .font(.system(size: 15, weight: .regular))
+            .foregroundStyle(Color.white.opacity(enabled ? (on ? 0.95 : 0.72) : 0.25))
+            .frame(width: 32, height: 28)
             .background(
-                on ? Color.white : Color.white.opacity(hovered && enabled ? 0.16 : 0.08),
-                in: Circle()
+                Color.white.opacity(on ? 0.16 : (hovered && enabled ? 0.08 : 0)),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
             )
-            .contentShape(Circle())
+            .contentShape(Rectangle())
             .onHover { hovered = $0 }
             .animation(.snappy(duration: 0.15), value: on)
             .animation(.easeOut(duration: 0.1), value: hovered)
@@ -71,7 +72,7 @@ struct HoverTip: ViewModifier {
                 if shown {
                     tip
                         .fixedSize()
-                        .offset(y: 40)
+                        .offset(y: 36)
                         .transition(.opacity.combined(with: .offset(y: -3)))
                         .allowsHitTesting(false)
                 }

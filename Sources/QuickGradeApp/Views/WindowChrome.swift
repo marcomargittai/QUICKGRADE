@@ -29,15 +29,13 @@ struct WindowLights: View {
     private func light(color: Color, symbol: String, title: String, shortcut: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Circle()
-                .fill(color)
-                .overlay(Circle().stroke(Color.black.opacity(0.2), lineWidth: 0.5))
+                .fill(Color.white.opacity(hovering ? 0.26 : 0.18))
                 .overlay {
                     Image(systemName: symbol)
-                        .font(.system(size: 7, weight: .heavy))
-                        .foregroundStyle(Color.black.opacity(0.6))
-                        .opacity(hovering ? 1 : 0)
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundStyle(Color.black.opacity(0.7))
                 }
-                .frame(width: 13, height: 13)
+                .frame(width: 16, height: 16)
                 .contentShape(Circle().inset(by: -3))
         }
         .buttonStyle(.plain)
@@ -112,11 +110,12 @@ struct RenameField: NSViewRepresentable {
         field.drawsBackground = true
         field.isBordered = false
         field.focusRingType = .none
-        field.alignment = .center
+        field.alignment = .left
         field.wantsLayer = true
         field.layer?.cornerRadius = 6
         field.cell?.isScrollable = true
         field.cell?.lineBreakMode = .byTruncatingMiddle
+        context.coordinator.watchClicks(field)
         DispatchQueue.main.async {
             field.window?.makeFirstResponder(field)
             let stem = (name as NSString).deletingPathExtension
@@ -147,14 +146,70 @@ struct RenameField: NSViewRepresentable {
             return false
         }
 
+        weak var field: NSTextField?
+        private var clickMonitor: Any?
+
+        /// A click anywhere else keeps what was typed, as Finder does.
+        /// Clicks on the photo don't take focus, so the field never hears about them on its own.
+        func watchClicks(_ field: NSTextField) {
+            self.field = field
+            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                guard let self, let field = self.field else { return event }
+                let inside = event.window === field.window
+                    && field.bounds.contains(field.convert(event.locationInWindow, from: nil))
+                if !inside { self.finish(commit: field.stringValue) }
+                return event
+            }
+        }
+
         func controlTextDidEndEditing(_ obj: Notification) {
-            finish(commit: nil)
+            finish(commit: field?.stringValue)
         }
 
         private func finish(commit name: String?) {
             guard !finished else { return }
             finished = true
-            if let name { parent.onCommit(name) } else { parent.onCancel() }
+            if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+            clickMonitor = nil
+            DispatchQueue.main.async {
+                if let name { self.parent.onCommit(name) } else { self.parent.onCancel() }
+            }
         }
+    }
+}
+
+/// Share, as in Preview. The menu opens under the button.
+struct ShareButton: View {
+    @Bindable var session: GradeSession
+    @State private var anchor = ShareAnchor()
+
+    var body: some View {
+        Button {
+            if let view = anchor.view { session.share(from: view) }
+        } label: {
+            ToolbarGlyph(symbol: "square.and.arrow.up")
+        }
+        .buttonStyle(.plain)
+        .background(ShareAnchorView(anchor: anchor))
+        .modifier(HoverTip(title: "Share", shortcut: "AirDrop, Messages, Mail", alignment: .topTrailing))
+        .accessibilityLabel("Share")
+    }
+}
+
+final class ShareAnchor {
+    weak var view: NSView?
+}
+
+private struct ShareAnchorView: NSViewRepresentable {
+    let anchor: ShareAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        anchor.view = nsView
     }
 }

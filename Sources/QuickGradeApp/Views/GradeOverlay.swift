@@ -9,34 +9,44 @@ struct GradeOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 0) {
-            imageStage
-            shelf
-                .frame(width: 340)
+        VStack(spacing: 0) {
+            topBar
+                .padding(.horizontal, 14)
+                .frame(height: 50)
+                .background(WindowDragCatcher())
+                .zIndex(1)
+            HStack(spacing: 0) {
+                imageStage
+                    .clipShape(RoundedRectangle(cornerRadius: session.isFullScreen ? 0 : 10, style: .continuous))
+                    .padding(.leading, session.isFullScreen ? 0 : 8)
+                    .padding(.bottom, session.isFullScreen ? 0 : 8)
+                shelf
+                    .frame(width: 340)
+            }
         }
-        .background(session.isFullScreen ? Color.black : Color(white: 0.06))
+        .background {
+            if session.isFullScreen {
+                Color.black
+            } else {
+                // Frosted glass, kept dark so the photo still reads true.
+                GlassBackground()
+                    .overlay(Color.black.opacity(0.28))
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: session.isFullScreen ? 0 : 16, style: .continuous)
-                .stroke(Color.white.opacity(session.isFullScreen ? 0 : 0.08), lineWidth: 1)
+                .stroke(Color.white.opacity(session.isFullScreen ? 0 : 0.1), lineWidth: 1)
         )
+        .ignoresSafeArea()
         .onHover { hovering = $0 }
     }
 
     private var imageStage: some View {
         ZStack {
-            Color.black
+            Color.black.opacity(session.isFullScreen ? 1 : 0.72)
             photo
-            LinearGradient(
-                colors: [Color.black.opacity(0.55), Color.black.opacity(0)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 72)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .allowsHitTesting(false)
 
             VStack {
-                topBar
                 Spacer()
                     .allowsHitTesting(false)
                 if let hud = session.hud {
@@ -50,7 +60,6 @@ struct GradeOverlay: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.top, 10)
 
             HStack(spacing: 6) {
                 if session.showingOriginal {
@@ -61,7 +70,7 @@ struct GradeOverlay: View {
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
-            .padding(.top, 56)
+            .padding(.top, 12)
             .allowsHitTesting(false)
 
             if hovering {
@@ -105,16 +114,15 @@ struct GradeOverlay: View {
                 onClose: { session.close() },
                 onFullScreen: { session.toggleFullScreen() }
             )
-            .padding(.trailing, 6)
-            Spacer(minLength: 8)
+            .padding(.trailing, 4)
             FileTitle(session: session)
                 .layoutPriority(-1)
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
 
             ToolbarButton(symbol: "crop", title: "Crop & Straighten", shortcut: "C", on: session.cropping) {
                 session.toggleCrop()
             }
-            ToolbarButton(symbol: "pencil.and.scribble", title: "Draw", shortcut: "D", on: session.drawing) {
+            ToolbarButton(symbol: "pencil", title: "Draw", shortcut: "D", on: session.drawing) {
                 session.toggleDrawing()
             }
             compareButton
@@ -126,6 +134,7 @@ struct GradeOverlay: View {
                 session.redo()
             }
             separator
+            ShareButton(session: session)
             optionsMenu
         }
     }
@@ -213,14 +222,6 @@ struct GradeOverlay: View {
                 gradeShelf
             }
         }
-        .background(session.cropping || session.drawing ? Color.white.opacity(0.045) : Color.clear)
-        .overlay(alignment: .leading) {
-            if session.cropping || session.drawing {
-                Rectangle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(width: 1)
-            }
-        }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.cropping)
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.drawing)
     }
@@ -301,9 +302,7 @@ struct GradeOverlay: View {
                         MarkupLayer(strokes: session.settings.markup)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 36)
-                .padding(.bottom, 16)
+                .padding(16)
                 .scaleEffect(session.zoom)
                 .offset(session.pan)
                 .allowsHitTesting(false)
@@ -375,12 +374,6 @@ struct GradeOverlay: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.white.opacity(0.045))
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 1)
-        }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.page)
     }
 
@@ -501,6 +494,19 @@ struct GradeOverlay: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+struct GlassBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        // The shelf is a panel in a background app. Without this the glass turns flat grey.
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 private struct WindowDragCatcher: NSViewRepresentable {

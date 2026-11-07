@@ -38,7 +38,7 @@ enum SpaceAction: Sendable {
 }
 
 @MainActor
-final class GradeController: NSObject, NSWindowDelegate {
+final class GradeController: NSObject, NSWindowDelegate, NSSharingServicePickerDelegate, NSSharingServiceDelegate {
     static let shared = GradeController()
 
     let session = GradeSession()
@@ -83,6 +83,7 @@ final class GradeController: NSObject, NSWindowDelegate {
     private var windowedFrame: NSRect?
     private var finderView: FinderView?
     private var stepping = false
+    private var sharing = false
     private var lastArrowAt = Date.distantPast
 
     private override init() {
@@ -93,6 +94,7 @@ final class GradeController: NSObject, NSWindowDelegate {
         }
         session.performGo = { [weak self] delta in self?.step(delta < 0 ? .left : .right) }
         session.performRename = { [weak self] name in self?.rename(to: name) }
+        session.performShare = { [weak self] anchor in self?.share(from: anchor) }
         session.performSave = { [weak self] in self?.save() }
         session.performClose = { [weak self] in self?.close() }
         session.performCopyImage = { [weak self] in self?.copyImage() }
@@ -167,12 +169,12 @@ final class GradeController: NSObject, NSWindowDelegate {
     }
 
     func appResigned() {
-        guard !opening, Date() > ignoreResignUntil else { return }
+        guard !opening, !sharing, Date() > ignoreResignUntil else { return }
         close(restoreSelection: false)
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        guard !opening, !closing, Date() > ignoreResignUntil else { return }
+        guard !opening, !closing, !sharing, Date() > ignoreResignUntil else { return }
         close(restoreSelection: false)
     }
 
@@ -979,6 +981,77 @@ final class GradeController: NSObject, NSWindowDelegate {
             let view = FinderSelection.frontWindowView()
             DispatchQueue.main.async { self?.finderView = view }
         }
+    }
+
+    /// The system share menu: AirDrop, Messages, Mail and the rest.
+    /// Shares the photo as it looks now, edits and drawing included, under its own name.
+    private func share(from anchor: NSView) {
+        guard let url = sourceURL else { return }
+        let settings = session.settings
+        guard !settings.isNeutral else {
+            presentShare([url], from: anchor)
+            return
+        }
+        session.flash("Preparing…")
+        renderQueue.async { [weak self] in
+            let pixels = GradeStore.originalURL(for: url)
+            let folder = FileManager.default.temporaryDirectory
+                .appendingPathComponent("QuickGrade Share", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let copy = folder.appendingPathComponent(url.lastPathComponent)
+            var shared = url
+            if let graded = self?.renderGraded(from: pixels, settings: settings) {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try ImageLoading.write(graded, to: copy, copyingMetadataFrom: pixels)
+                    shared = copy
+                } catch {}
+            }
+            DispatchQueue.main.async {
+                guard let self, anchor.window != nil else { return }
+                self.session.notice = nil
+                self.presentShare([shared], from: anchor)
+            }
+        }
+    }
+
+    private func presentShare(_ items: [URL], from anchor: NSView) {
+        sharing = true
+        let picker = NSSharingServicePicker(items: items)
+        picker.delegate = self
+        picker.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
+
+    private func endSharing() {
+        sharing = false
+        panel?.level = NSWindow.Level(rawValue: session.isFullScreen
+            ? NSWindow.Level.mainMenu.rawValue + 1
+            : NSWindow.Level.floating.rawValue + 2)
+        ignoreResignUntil = Date().addingTimeInterval(0.5)
+        panel?.makeKeyAndOrderFront(nil)
+    }
+
+    nonisolated func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+        MainActor.assumeIsolated {
+            guard service != nil else {
+                endSharing()
+                return
+            }
+            // AirDrop and Messages open their own windows. Step down so they land on top.
+            panel?.level = .normal
+        }
+    }
+
+    nonisolated func sharingServicePicker(_ picker: NSSharingServicePicker, delegateFor service: NSSharingService) -> NSSharingServiceDelegate? {
+        self
+    }
+
+    nonisolated func sharingService(_ service: NSSharingService, didShareItems items: [Any]) {
+        MainActor.assumeIsolated { endSharing() }
+    }
+
+    nonisolated func sharingService(_ service: NSSharingService, didFailToShareItems items: [Any], error: Error) {
+        MainActor.assumeIsolated { endSharing() }
     }
 
     /// Renames the file in place and carries its grade, original and icon along.

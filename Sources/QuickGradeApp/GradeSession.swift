@@ -74,6 +74,7 @@ final class GradeSession {
     var performCopyImage: () -> Void = {}
     var performToggleFullScreen: () -> Void = {}
     var performRename: (String) -> Void = { _ in }
+    var performShare: (NSView) -> Void = { _ in }
 
     private var editBaseline: GradeSettings?
     private var editAction: String?
@@ -256,6 +257,10 @@ final class GradeSession {
         let before = settings
         settings.markup = []
         commit(from: before, action: "Clear Drawing")
+    }
+
+    func share(from anchor: NSView) {
+        performShare(anchor)
     }
 
     func rename(to name: String) {
