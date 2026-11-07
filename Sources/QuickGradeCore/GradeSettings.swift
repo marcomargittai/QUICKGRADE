@@ -254,11 +254,9 @@ public struct GradeSettings: Codable, Equatable {
     public var filter: PhotoFilter
     public var filterStrength: Double
     public var curves: CurveSet
-    public var removeBackground: Bool
     public var crop: CropEdit
-    public var selectionStrokes: [SelectionStroke]
-    /// 0 stays on the marker. 1 takes the whole object the marker touches.
-    public var selectionReach: Double
+    /// Pen strokes drawn over the finished photo.
+    public var markup: [MarkupStroke]
 
     public init(
         exposure: Double = 0,
@@ -285,10 +283,8 @@ public struct GradeSettings: Codable, Equatable {
         filter: PhotoFilter = .original,
         filterStrength: Double = 100,
         curves: CurveSet = .identity,
-        removeBackground: Bool = false,
         crop: CropEdit = .identity,
-        selectionStrokes: [SelectionStroke] = [],
-        selectionReach: Double = 0.55
+        markup: [MarkupStroke] = []
     ) {
         self.exposure = exposure
         self.clarity = clarity
@@ -314,16 +310,14 @@ public struct GradeSettings: Codable, Equatable {
         self.filter = filter
         self.filterStrength = min(max(filterStrength, 0), 100)
         self.curves = curves
-        self.removeBackground = removeBackground
         self.crop = crop
-        self.selectionStrokes = selectionStrokes
-        self.selectionReach = min(max(selectionReach, 0), 1)
+        self.markup = markup
     }
 
     private enum CodingKeys: String, CodingKey {
         case exposure, clarity, highlights, shadows, contrast, definition, brightness, whites, blacks
         case saturation, vibrance, temperature, tint, hsl, sharpen, noiseReduction, fade, vignette
-        case grainShadows, grainMidtones, grainHighlights, filter, filterStrength, curves, removeBackground, crop, selectionStrokes, selectionReach
+        case grainShadows, grainMidtones, grainHighlights, filter, filterStrength, curves, crop, markup
     }
 
     public init(from decoder: Decoder) throws {
@@ -353,10 +347,8 @@ public struct GradeSettings: Codable, Equatable {
             filter: container.decodeIfPresent(PhotoFilter.self, forKey: .filter) ?? .original,
             filterStrength: container.decodeIfPresent(Double.self, forKey: .filterStrength) ?? 100,
             curves: container.decode(CurveSet.self, forKey: .curves),
-            removeBackground: container.decodeIfPresent(Bool.self, forKey: .removeBackground) ?? false,
             crop: container.decodeIfPresent(CropEdit.self, forKey: .crop) ?? .identity,
-            selectionStrokes: container.decodeIfPresent([SelectionStroke].self, forKey: .selectionStrokes) ?? [],
-            selectionReach: container.decodeIfPresent(Double.self, forKey: .selectionReach) ?? 0.55
+            markup: container.decodeIfPresent([MarkupStroke].self, forKey: .markup) ?? []
         )
     }
 
@@ -386,10 +378,8 @@ public struct GradeSettings: Codable, Equatable {
         try container.encode(filter, forKey: .filter)
         try container.encode(filterStrength, forKey: .filterStrength)
         try container.encode(curves, forKey: .curves)
-        try container.encode(removeBackground, forKey: .removeBackground)
         try container.encode(crop, forKey: .crop)
-        try container.encode(selectionStrokes, forKey: .selectionStrokes)
-        try container.encode(selectionReach, forKey: .selectionReach)
+        try container.encode(markup, forKey: .markup)
     }
 
     public static let neutral = GradeSettings()

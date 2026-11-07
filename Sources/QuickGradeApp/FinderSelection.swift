@@ -443,6 +443,46 @@ enum FinderSelection {
     }
 }
 
+/// How the front Finder window lays out its files.
+enum FinderLayout: Sendable {
+    /// List, column and gallery view. Up and down step one file, like left and right.
+    case rows
+    /// Icon view. Where each file name sits in the window, y pointing down.
+    case grid([String: CGPoint])
+}
+
+extension FinderSelection {
+    static func frontWindowLayout() -> FinderLayout {
+        let source = """
+        tell application "Finder"
+            if (count of windows) is 0 then return "rows"
+            set w to front window
+            if current view of w is not icon view then return "rows"
+            set theNames to name of every item of w
+            set thePositions to position of every item of w
+            set out to ""
+            repeat with i from 1 to count of theNames
+                set p to item i of thePositions
+                set out to out & (item 1 of p) & "," & (item 2 of p) & tab & (item i of theNames) & linefeed
+            end repeat
+            return out
+        end tell
+        """
+        guard let text = runAppleScript(source) else { return .rows }
+        var spots: [String: CGPoint] = [:]
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let xy = parts[0].split(separator: ",")
+            guard xy.count == 2, let x = Double(xy[0]), let y = Double(xy[1]) else { continue }
+            spots[String(parts[1])] = CGPoint(x: x, y: y)
+        }
+        // Finder reports one shared spot when it has no real arrangement. Fall back to rows.
+        guard Set(spots.values.map { "\($0.x),\($0.y)" }).count > 1 else { return .rows }
+        return .grid(spots)
+    }
+}
+
 final class SelectionCache {
     static let shared = SelectionCache()
     private var stored: [URL] = []

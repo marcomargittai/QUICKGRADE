@@ -154,33 +154,6 @@ public enum GradeEngine {
         return image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
     }
 
-    /// Uses the alpha of a cutout as a mask over an opaque graded image.
-    public static func applyingMask(from cutout: CGImage, to graded: CGImage) -> CGImage {
-        let extent = CGRect(x: 0, y: 0, width: CGFloat(graded.width), height: CGFloat(graded.height))
-        let base = CIImage(cgImage: graded)
-        var maskImage = CIImage(cgImage: cutout)
-        let scaleX = extent.width / max(maskImage.extent.width, 1)
-        let scaleY = extent.height / max(maskImage.extent.height, 1)
-        if abs(scaleX - 1) > 0.001 || abs(scaleY - 1) > 0.001 {
-            maskImage = maskImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        }
-        let alpha = maskImage.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1)
-        ]).cropped(to: extent)
-        let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: extent)
-        let blended = base
-            .applyingFilter("CIBlendWithMask", parameters: [
-                kCIInputBackgroundImageKey: clear,
-                kCIInputMaskImageKey: alpha
-            ])
-            .cropped(to: extent)
-        return sharedContext.createCGImage(blended, from: extent) ?? graded
-    }
-
     // MARK: - Shared context
 
     private static let sharedContext: CIContext = {

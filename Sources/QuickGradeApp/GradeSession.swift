@@ -22,14 +22,12 @@ final class GradeSession {
     var originalLocked = false
     var originalHeld = false
     var showClipping = false
-    var lifting = false
     var cropping = false
-    var selecting = false
-    var brush: CGFloat = 28
-    var erasing = false
-    var strokes: [SelectionStroke] = []
-    var applyingSelection = false
-    var performApplySelection: () -> Void = {}
+    var drawing = false
+    var markupColor: MarkupColor = .pink
+    var markupSize: MarkupSize = .medium
+    var erasingMarkup = false
+    var isFullScreen = false
     var sourceAspect: CGFloat = 1
     var cropInteracting = false {
         didSet {
@@ -74,6 +72,7 @@ final class GradeSession {
     var performSave: () -> Void = {}
     var performClose: () -> Void = {}
     var performCopyImage: () -> Void = {}
+    var performToggleFullScreen: () -> Void = {}
 
     private var editBaseline: GradeSettings?
     private var editAction: String?
@@ -183,7 +182,7 @@ final class GradeSession {
 
     func toggleCrop() {
         if cropInteracting { cropInteracting = false }
-        if selecting { selecting = false }
+        if drawing { drawing = false }
         cropping.toggle()
         if cropping {
             cropFrame = settings.crop.rect
@@ -220,53 +219,46 @@ final class GradeSession {
         }
     }
 
-    func toggleSelection() {
+    func toggleDrawing() {
         if cropInteracting { cropInteracting = false }
         if cropping { cropping = false }
-        selecting.toggle()
-        if selecting {
-            strokes = settings.selectionStrokes
+        drawing.toggle()
+        if drawing {
+            zoom = 1
+            pan = .zero
+            originalLocked = false
         }
         onChange?()
     }
 
-    func applySelection() {
-        guard !strokes.isEmpty, !applyingSelection else { return }
-        applyingSelection = true
-        performApplySelection()
-    }
-
-    func finishSelection(maskReady: Bool) {
-        applyingSelection = false
-        guard maskReady else {
-            flash("Couldn't keep that selection")
-            return
-        }
+    func addMarkup(_ stroke: MarkupStroke) {
+        guard !stroke.points.isEmpty else { return }
         let before = settings
-        settings.selectionStrokes = strokes
-        settings.removeBackground = true
-        commit(from: before, action: "Remove Background")
+        settings.markup.append(stroke)
+        commit(from: before, action: "Draw")
     }
 
-    func beginReach() {
-        beginEdit(action: "Reach")
+    func beginErase() {
+        beginEdit(action: "Erase")
     }
 
-    func previewReach(_ value: Double) {
-        if editBaseline == nil { beginEdit(action: "Reach") }
-        settings.selectionReach = min(max(value, 0), 1)
+    /// Removes every stroke under `point`. `aspect` is the photo's width / height.
+    func erase(at point: CGPoint, aspect: CGFloat) {
+        let kept = settings.markup.filter { !Markup.hits($0, at: point, aspect: aspect, slack: 0.008) }
+        guard kept.count != settings.markup.count else { return }
+        settings.markup = kept
+        onChange?()
     }
 
-    func endReach() {
-        let before = editBaseline
-        if settings.removeBackground, !strokes.isEmpty {
-            settings.selectionStrokes = strokes
-        }
-        let changed = before.map { $0 != settings } ?? false
-        let recut = changed && settings.removeBackground && !strokes.isEmpty
-        if recut { applyingSelection = true }
-        endEdit()
-        if recut { performApplySelection() }
+    func clearMarkup() {
+        guard !settings.markup.isEmpty else { return }
+        let before = settings
+        settings.markup = []
+        commit(from: before, action: "Clear Drawing")
+    }
+
+    func toggleFullScreen() {
+        performToggleFullScreen()
     }
 
     func undo() {
@@ -284,15 +276,6 @@ final class GradeSession {
         canRedo = undoManager.canRedo
     }
 
-    func restoreBackground() {
-        let before = settings
-        settings.removeBackground = false
-        settings.selectionStrokes = []
-        strokes = []
-        selecting = false
-        commit(from: before, action: "Restore Background")
-    }
-
     func setCrop(_ edit: CropEdit) {
         if cropInteracting {
             if editBaseline == nil { beginEdit(action: "Crop") }
@@ -303,15 +286,6 @@ final class GradeSession {
             settings.crop = edit
             commit(from: before, action: "Crop")
         }
-    }
-
-    func backgroundUnavailable() {
-        lifting = false
-        guard settings.removeBackground else { return }
-        let before = settings
-        settings.removeBackground = false
-        commit(from: before, action: "Remove Background")
-        flash("Nothing to lift in this photo")
     }
 
     func showHUD(symbol: String, name: String, value: String) {

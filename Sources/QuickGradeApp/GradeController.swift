@@ -76,15 +76,15 @@ final class GradeController: NSObject, NSWindowDelegate {
     private let iconRefreshQueue = DispatchQueue(label: "quickgrade.iconrefresh", qos: .utility)
     private var pendingIconPaths: Set<String> = []
     private var iconRefreshScheduled = false
-    private var cutoutPreview: CGImage?
     private var displayedCG: CGImage?
-    private var cutoutToken = 0
     private var lastComparable: GradeSettings?
     private var lastCropping = false
-    private var lastCutoutCrop = CropEdit.identity
-    private var lastCutoutCropping = false
-    private var lastSelectionReach = 0.55
-    private var lastSelectionStrokes: [SelectionStroke] = []
+    private var lastClipping = false
+    private var windowedFrame: NSRect?
+    private var layout = FinderLayout.rows
+    private var layoutFolder: URL?
+    private var layoutAt = Date.distantPast
+    private var lastArrowAt = Date.distantPast
 
     private override init() {
         super.init()
@@ -96,7 +96,7 @@ final class GradeController: NSObject, NSWindowDelegate {
         session.performSave = { [weak self] in self?.save() }
         session.performClose = { [weak self] in self?.close() }
         session.performCopyImage = { [weak self] in self?.copyImage() }
-        session.performApplySelection = { [weak self] in self?.applySelection() }
+        session.performToggleFullScreen = { [weak self] in self?.toggleFullScreen() }
     }
 
     func spaceAction() -> SpaceAction {
@@ -161,6 +161,7 @@ final class GradeController: NSObject, NSWindowDelegate {
             }
         }
         show(current, keepGrade: keepGrade)
+        refreshLayout(for: current.deletingLastPathComponent())
     }
 
     func appResigned() {
@@ -189,6 +190,7 @@ final class GradeController: NSObject, NSWindowDelegate {
         }
         panel.orderOut(nil)
         panel.alphaValue = 1
+        if session.isFullScreen { leaveFullScreenChrome(panel) }
         releasePreview()
         closing = false
         guard restoreSelection, let url else { return }
@@ -215,25 +217,16 @@ final class GradeController: NSObject, NSWindowDelegate {
         }
         session.originalLocked = false
         session.originalHeld = false
-        session.lifting = false
         session.cropping = false
         session.cropFrame = session.settings.crop.rect
-        session.selecting = false
+        session.drawing = false
         if !session.settings.isNeutral {
             refreshFinderIcon(url)
         }
-        session.applyingSelection = false
-        session.strokes = session.settings.selectionStrokes
         session.sourceAspect = CGFloat(preview.width) / CGFloat(max(preview.height, 1))
         displayedCG = preview
         lastComparable = nil
-        lastCutoutCrop = .identity
-        lastCutoutCropping = false
-        lastSelectionReach = session.settings.selectionReach
-        lastSelectionStrokes = session.settings.selectionStrokes
         session.hideHUD()
-        cutoutPreview = nil
-        cutoutToken += 1
         sourceURL = url
         sourcePreview = preview
         previewGrainScale = ImageLoading.grainScale(of: preview, againstOriginal: pixels)
@@ -351,53 +344,31 @@ final class GradeController: NSObject, NSWindowDelegate {
 
     private func scheduleRender() {
         guard let source = sourcePreview else { return }
-        var cutoutComparable = session.settings.crop
-        if session.cropping {
-            cutoutComparable.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
-        }
-        if cutoutComparable != lastCutoutCrop || session.cropping != lastCutoutCropping {
-            cutoutPreview = nil
-            lastCutoutCrop = cutoutComparable
-            lastCutoutCropping = session.cropping
-        }
-        if session.settings.selectionReach != lastSelectionReach
-            || session.settings.selectionStrokes != lastSelectionStrokes {
-            cutoutPreview = nil
-            lastSelectionReach = session.settings.selectionReach
-            lastSelectionStrokes = session.settings.selectionStrokes
-        }
-        let wantMask = session.settings.removeBackground
-        if wantMask && cutoutPreview == nil && !session.applyingSelection {
-            if session.settings.selectionStrokes.isEmpty {
-                scheduleCutout()
-            } else {
-                scheduleStrokeCutout()
-            }
-        }
+        // Markup is drawn live over the photo, so a stroke never needs a new render.
         var comparable = session.settings
+        comparable.markup = []
         if session.cropping {
             comparable.crop.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
         }
-        if session.cropping, !session.settings.removeBackground, lastCropping, lastComparable == comparable, session.gradedImage != nil {
+        if lastComparable == comparable, lastCropping == session.cropping,
+           lastClipping == session.showClipping, session.gradedImage != nil, !rendering {
             scheduleFilterThumbnails(source: source)
+            return
+        }
+        // Wait for the render in flight. It calls back here and compares against what it drew.
+        if rendering {
+            pending = true
             return
         }
         lastComparable = comparable
         lastCropping = session.cropping
-        let mask = wantMask ? cutoutPreview : nil
-        if session.settings.isNeutral && !session.showClipping && mask == nil {
+        lastClipping = session.showClipping
+        if comparable.isNeutral && !session.showClipping {
             displayedCG = source
             session.gradedImage = session.originalImage
             session.histogram = session.originalHistogram
             pending = false
             scheduleFilterThumbnails(source: source)
-            return
-        }
-        if wantMask && mask == nil {
-            return
-        }
-        if rendering {
-            pending = true
             return
         }
         rendering = true
@@ -408,7 +379,6 @@ final class GradeController: NSObject, NSWindowDelegate {
         renderQueue.async { [weak self] in
             let graded = GradeEngine.render(source: source, settings: settings, showClipping: clipping, cropRect: !cropping, grainScale: grainScale)
             let histogram = Histogram.compute(graded)
-            let output = mask.map { GradeEngine.applyingMask(from: $0, to: graded) } ?? graded
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.rendering = false
@@ -419,8 +389,8 @@ final class GradeController: NSObject, NSWindowDelegate {
                     }
                     return
                 }
-                self.displayedCG = output
-                self.session.gradedImage = self.nsImage(output)
+                self.displayedCG = graded
+                self.session.gradedImage = self.nsImage(graded)
                 self.session.histogram = histogram
                 self.scheduleFilterThumbnails(source: source)
                 if self.pending {
@@ -448,24 +418,10 @@ final class GradeController: NSObject, NSWindowDelegate {
                 }
                 return
             }
-            var graded = GradeEngine.render(source: full, settings: settings, showClipping: false)
-            if settings.removeBackground {
-                do {
-                    if settings.selectionStrokes.isEmpty {
-                        let prepared = GradeEngine.applyingGeometry(to: full, edit: settings.crop, cropRect: true)
-                        let cut = try SubjectCutout.cutout(source: prepared)
-                        graded = GradeEngine.applyingMask(from: cut, to: graded)
-                    } else {
-                        graded = try SelectionMask.cutout(
-                            source: graded,
-                            strokes: settings.selectionStrokes,
-                            reach: CGFloat(settings.selectionReach)
-                        )
-                    }
-                } catch {
-                    DispatchQueue.main.async { self?.session.flash("Saved without a cutout") }
-                }
-            }
+            let graded = Markup.drawing(
+                settings.markup,
+                over: GradeEngine.render(source: full, settings: settings, showClipping: false)
+            )
             let transparent = ImageTransfer.hasTransparency(graded)
             let ext = ImageTransfer.exportExtension(sourceExtension: sourceURL.pathExtension, transparent: transparent)
             let destination = ImageLoading.destinationURL(for: sourceURL, preferredExtension: ext)
@@ -507,8 +463,9 @@ final class GradeController: NSObject, NSWindowDelegate {
     }
 
     private func copyImage() {
-        let cg = session.showingOriginal ? sourcePreview : (displayedCG ?? sourcePreview)
-        guard let cg, let data = ImageTransfer.pngData(cg) else { return }
+        let shown = session.showingOriginal ? sourcePreview : (displayedCG ?? sourcePreview)
+        let markup = session.showingOriginal || session.cropping ? [] : session.settings.markup
+        guard let cg = shown.map({ Markup.drawing(markup, over: $0) }), let data = ImageTransfer.pngData(cg) else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setData(data, forType: .png)
@@ -519,74 +476,6 @@ final class GradeController: NSObject, NSWindowDelegate {
         guard let panel, panel.isVisible, !closing else { return false }
         if redo { session.redo() } else { session.undo() }
         return true
-    }
-
-    private func applySelection() {
-        guard let source = sourcePreview else {
-            session.finishSelection(maskReady: false)
-            return
-        }
-        cutoutPreview = nil
-        let strokes = session.strokes
-        let settings = session.settings
-        let reach = CGFloat(settings.selectionReach)
-        let grainScale = previewGrainScale
-        renderQueue.async { [weak self] in
-            let graded = GradeEngine.render(source: source, settings: settings, showClipping: false, cropRect: true, grainScale: grainScale)
-            let cut: CGImage?
-            do {
-                cut = try SelectionMask.cutout(source: graded, strokes: strokes, reach: reach)
-            } catch {
-                cut = nil
-            }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard let cut else {
-                    self.session.finishSelection(maskReady: false)
-                    return
-                }
-                self.cutoutPreview = cut
-                self.lastSelectionReach = self.session.settings.selectionReach
-                self.lastSelectionStrokes = self.session.strokes
-                self.session.finishSelection(maskReady: true)
-                self.scheduleRender()
-            }
-        }
-    }
-
-    private func scheduleStrokeCutout() {
-        guard cutoutPreview == nil, !session.lifting, let source = sourcePreview else { return }
-        let strokes = session.settings.selectionStrokes
-        guard !strokes.isEmpty else { return }
-        session.lifting = true
-        cutoutToken += 1
-        let token = cutoutToken
-        let settings = session.settings
-        let grainScale = previewGrainScale
-        renderQueue.async { [weak self] in
-            let graded = GradeEngine.render(source: source, settings: settings, showClipping: false, cropRect: true, grainScale: grainScale)
-            let image: CGImage?
-            do {
-                image = try SelectionMask.cutout(
-                    source: graded,
-                    strokes: strokes,
-                    reach: CGFloat(settings.selectionReach)
-                )
-            } catch {
-                image = nil
-            }
-            DispatchQueue.main.async {
-                guard let self, self.cutoutToken == token else { return }
-                self.session.lifting = false
-                guard self.sourcePreview === source, self.session.settings.removeBackground else { return }
-                guard let image else {
-                    self.session.backgroundUnavailable()
-                    return
-                }
-                self.cutoutPreview = image
-                self.scheduleRender()
-            }
-        }
     }
 
     private func go(by delta: Int) {
@@ -680,24 +569,8 @@ final class GradeController: NSObject, NSWindowDelegate {
 
     private func renderGraded(from pixels: URL, settings: GradeSettings) -> CGImage? {
         guard let full = ImageLoading.oriented(url: pixels, maxPixel: nil) else { return nil }
-        var graded = GradeEngine.render(source: full, settings: settings, showClipping: false)
-        guard settings.removeBackground else { return graded }
-        do {
-            if settings.selectionStrokes.isEmpty {
-                let prepared = GradeEngine.applyingGeometry(to: full, edit: settings.crop, cropRect: true)
-                let cut = try SubjectCutout.cutout(source: prepared)
-                graded = GradeEngine.applyingMask(from: cut, to: graded)
-            } else {
-                graded = try SelectionMask.cutout(
-                    source: graded,
-                    strokes: settings.selectionStrokes,
-                    reach: CGFloat(settings.selectionReach)
-                )
-            }
-        } catch {
-            return graded
-        }
-        return graded
+        let graded = GradeEngine.render(source: full, settings: settings, showClipping: false)
+        return Markup.drawing(settings.markup, over: graded)
     }
 
     /// After the shelf closes, point Finder at the same path again.
@@ -839,7 +712,7 @@ final class GradeController: NSObject, NSWindowDelegate {
     }
 
     private func zoomEvent(_ event: NSEvent) -> Bool {
-        guard let panel, panel.isVisible, !session.selecting else { return false }
+        guard let panel, panel.isVisible, !session.drawing else { return false }
         guard session.displayedImage != nil else { return false }
         let mouse = NSEvent.mouseLocation
         var stage = panel.frame
@@ -952,7 +825,21 @@ final class GradeController: NSObject, NSWindowDelegate {
             compareDownAt = nil
             return true
         }
-        guard event.type == .keyDown, !event.isARepeat else { return false }
+        guard event.type == .keyDown else { return false }
+
+        // Arrows repeat while held, a little slower than the key rate so each photo lands.
+        if plain, let arrow = Arrow(rawValue: event.keyCode) {
+            if event.isARepeat, Date().timeIntervalSince(lastArrowAt) < 0.09 { return true }
+            lastArrowAt = Date()
+            switch arrow {
+            case .left: go(by: -1)
+            case .right: go(by: 1)
+            case .up: goVertical(down: false)
+            case .down: goVertical(down: true)
+            }
+            return true
+        }
+        guard !event.isARepeat else { return false }
 
         if event.keyCode == 42, plain {
             if !compareDown {
@@ -962,7 +849,20 @@ final class GradeController: NSObject, NSWindowDelegate {
             }
             return true
         }
-        if event.keyCode == 49 || event.keyCode == 53 {
+        // Escape steps back one level: full screen, then a tool, then the shelf itself.
+        if event.keyCode == 53 {
+            if session.isFullScreen {
+                toggleFullScreen()
+            } else if session.drawing {
+                session.toggleDrawing()
+            } else if session.cropping {
+                session.toggleCrop()
+            } else {
+                close()
+            }
+            return true
+        }
+        if event.keyCode == 49 {
             close()
             return true
         }
@@ -990,19 +890,112 @@ final class GradeController: NSObject, NSWindowDelegate {
             copyImage()
             return true
         }
-        if plain && event.keyCode == 38 {
+        guard plain else { return false }
+        switch event.keyCode {
+        case 38:
             session.toggleClipping()
-            return true
-        }
-        if plain && (event.keyCode == 123 || event.keyCode == 124) {
-            go(by: event.keyCode == 123 ? -1 : 1)
-            return true
-        }
-        if plain, let page = page(for: event.keyCode) {
+        case 8:
+            session.toggleCrop()
+        case 2:
+            session.toggleDrawing()
+        case 3:
+            toggleFullScreen()
+        case 14 where session.drawing:
+            session.erasingMarkup.toggle()
+        default:
+            guard let page = page(for: event.keyCode) else { return false }
             session.page = page
-            return true
         }
-        return false
+        return true
+    }
+
+    private enum Arrow: UInt16 {
+        case left = 123
+        case right = 124
+        case down = 125
+        case up = 126
+    }
+
+    /// Up and down follow Finder. Icon view moves to the photo above or below,
+    /// list, column and gallery view move one photo like left and right.
+    private func goVertical(down: Bool) {
+        guard urls.indices.contains(index) else { return }
+        let folder = urls[index].deletingLastPathComponent()
+        if Date().timeIntervalSince(layoutAt) > 3 { refreshLayout(for: folder) }
+        guard case .grid(let spots) = layout,
+              layoutFolder?.path == folder.path,
+              let here = spots[urls[index].lastPathComponent] else {
+            go(by: down ? 1 : -1)
+            return
+        }
+        let tolerance: CGFloat = 4
+        var candidates: [(index: Int, spot: CGPoint)] = []
+        for (position, url) in urls.enumerated() {
+            guard let spot = spots[url.lastPathComponent] else { continue }
+            let beyond = down ? spot.y > here.y + tolerance : spot.y < here.y - tolerance
+            if beyond { candidates.append((position, spot)) }
+        }
+        let rowY = down ? candidates.map(\.spot.y).min() : candidates.map(\.spot.y).max()
+        guard let rowY else { return }
+        let best = candidates
+            .filter { abs($0.spot.y - rowY) <= tolerance }
+            .min { abs($0.spot.x - here.x) < abs($1.spot.x - here.x) }
+        guard let best else { return }
+        go(by: best.index - index)
+    }
+
+    private func refreshLayout(for folder: URL) {
+        layoutAt = Date()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Finder's front window must show this folder, or its grid says nothing about these photos.
+            guard FinderSelection.frontWindowFolder()?.path == folder.path else { return }
+            let next = FinderSelection.frontWindowLayout()
+            DispatchQueue.main.async {
+                self?.layout = next
+                self?.layoutFolder = folder
+            }
+        }
+    }
+
+    /// Fills the screen above the menu bar and Dock, like Quick Look's full screen,
+    /// without a separate Space. A new Space would take focus from Finder and close the shelf.
+    private func toggleFullScreen() {
+        guard let panel, panel.isVisible, let screen = panel.screen ?? NSScreen.main else { return }
+        let entering = !session.isFullScreen
+        let target: NSRect
+        if entering {
+            windowedFrame = panel.frame
+            target = screen.frame
+            panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
+            panel.contentView?.layer?.cornerRadius = 0
+            panel.hasShadow = false
+        } else {
+            target = windowedFrame ?? frame(for: CGSize(width: displayedCG?.width ?? 1600, height: displayedCG?.height ?? 1000))
+            leaveFullScreenChrome(panel)
+        }
+        session.isFullScreen = entering
+        ignoreResignUntil = Date().addingTimeInterval(0.6)
+        session.zoom = 1
+        session.pan = .zero
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.setFrame(target, display: true)
+            panel.invalidateShadow()
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.85, 0.2, 1)
+                panel.animator().setFrame(target, display: true)
+            } completionHandler: {
+                Task { @MainActor in panel.invalidateShadow() }
+            }
+        }
+    }
+
+    private func leaveFullScreenChrome(_ panel: GradePanel) {
+        session.isFullScreen = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 2)
+        panel.contentView?.layer?.cornerRadius = 16
+        panel.hasShadow = true
     }
 
     private func page(for keyCode: UInt16) -> GradePage? {
@@ -1017,48 +1010,12 @@ final class GradeController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func scheduleCutout() {
-        guard cutoutPreview == nil, !session.lifting, let source = sourcePreview else { return }
-        session.lifting = true
-        cutoutToken += 1
-        let token = cutoutToken
-        let edit = session.settings.crop
-        let cropRect = !session.cropping
-        renderQueue.async { [weak self] in
-            let image: CGImage?
-            do {
-                let prepared = GradeEngine.applyingGeometry(
-                    to: source,
-                    edit: edit,
-                    cropRect: cropRect
-                )
-                image = try SubjectCutout.cutout(source: prepared)
-            } catch {
-                image = nil
-            }
-            DispatchQueue.main.async {
-                guard let self, self.cutoutToken == token else { return }
-                self.session.lifting = false
-                guard self.sourcePreview === source, self.session.settings.removeBackground else { return }
-                guard let image else {
-                    self.session.backgroundUnavailable()
-                    return
-                }
-                self.cutoutPreview = image
-                self.scheduleRender()
-            }
-        }
-    }
-
     private func releasePreview() {
         sourcePreview = nil
         previewGrainScale = 1
         sourceURL = nil
         filterThumbBase = nil
         session.filterThumbnails = [:]
-        cutoutPreview = nil
-        cutoutToken += 1
-        session.lifting = false
         session.gradedImage = nil
         session.originalImage = nil
     }

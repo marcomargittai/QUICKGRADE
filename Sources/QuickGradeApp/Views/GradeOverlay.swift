@@ -14,21 +14,17 @@ struct GradeOverlay: View {
             shelf
                 .frame(width: 340)
         }
-        .background(Color(white: 0.06))
+        .background(session.isFullScreen ? Color.black : Color(white: 0.06))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: session.isFullScreen ? 0 : 16, style: .continuous)
+                .stroke(Color.white.opacity(session.isFullScreen ? 0 : 0.08), lineWidth: 1)
         )
         .onHover { hovering = $0 }
     }
 
     private var imageStage: some View {
         ZStack {
-            if session.settings.removeBackground {
-                Checkerboard()
-            } else {
-                Color.black
-            }
+            Color.black
             photo
             LinearGradient(
                 colors: [Color.black.opacity(0.55), Color.black.opacity(0)],
@@ -56,12 +52,17 @@ struct GradeOverlay: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
 
-            if session.showingOriginal {
-                badge("Original")
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 52)
-                    .allowsHitTesting(false)
+            HStack(spacing: 6) {
+                if session.showingOriginal {
+                    badge("Original")
+                }
+                if session.showClipping && !session.cropping && !session.drawing {
+                    badge("Clipping shown · J to hide")
+                }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(.top, 56)
+            .allowsHitTesting(false)
 
             if hovering {
                 HStack {
@@ -87,99 +88,85 @@ struct GradeOverlay: View {
             session.zoom = 1
             session.pan = .zero
         }
-        .onChange(of: session.selecting) { _, _ in
+        .onChange(of: session.drawing) { _, _ in
             session.zoom = 1
             session.pan = .zero
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: session.hud)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: session.notice)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: session.showingOriginal)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: session.showClipping)
     }
 
     private var topBar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
+        HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text(session.fileName)
                     .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if session.isDirty {
                     Circle()
                         .fill(Color.white.opacity(0.92))
                         .frame(width: 6, height: 6)
-                        .help("Adjustments are kept for this photo")
+                        .modifier(HoverTip(title: "Edited. Your changes are kept.", shortcut: nil, alignment: .topLeading))
+                }
+                if let position = session.positionText {
+                    Text(position)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white.opacity(0.5))
+                        .fixedSize()
                 }
             }
-            .foregroundStyle(Color.white.opacity(0.9))
-            Spacer()
-            if let position = session.positionText {
-                Text(position)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(0.62))
-            }
-            iconButton(
-                "crop",
-                on: session.cropping,
-                help: "Crop"
-            ) {
+            .layoutPriority(-1)
+            Spacer(minLength: 12)
+
+            ToolbarButton(symbol: "crop", title: "Crop & Straighten", shortcut: "C", on: session.cropping) {
                 session.toggleCrop()
             }
-            iconButton(
-                "person.and.background.dotted",
-                on: session.selecting || session.settings.removeBackground,
-                enabled: !session.applyingSelection,
-                help: "Mark what should stay"
-            ) {
-                session.toggleSelection()
+            ToolbarButton(symbol: "pencil.and.scribble", title: "Draw", shortcut: "D", on: session.drawing) {
+                session.toggleDrawing()
             }
             compareButton
-            iconButton(
-                session.showClipping ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
-                on: session.showClipping,
-                help: "Clipping. Marks blown-out whites and crushed blacks (J)."
-            ) {
-                session.toggleClipping()
-            }
-            iconButton(
-                "arrow.uturn.backward",
-                enabled: session.canUndo,
-                help: "Undo (⌘Z)"
-            ) {
+            separator
+            ToolbarButton(symbol: "arrow.uturn.backward", title: undoTitle, shortcut: "⌘Z", enabled: session.canUndo) {
                 session.undo()
             }
-            if session.canRedo {
-                iconButton(
-                    "arrow.uturn.forward",
-                    enabled: true,
-                    help: "Redo (⇧⌘Z)"
-                ) {
-                    session.redo()
-                }
+            ToolbarButton(symbol: "arrow.uturn.forward", title: "Redo", shortcut: "⇧⌘Z", enabled: session.canRedo) {
+                session.redo()
             }
-            iconButton(
-                "arrow.counterclockwise",
-                enabled: session.isDirty,
-                help: "Revert this page. Option-click reverts the whole photo."
+            separator
+            ToolbarButton(
+                symbol: session.isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                title: session.isFullScreen ? "Exit Full Screen" : "Full Screen",
+                shortcut: "F",
+                tipAlignment: .topTrailing
             ) {
-                if NSEvent.modifierFlags.contains(.option) {
-                    session.resetAll()
-                } else {
-                    session.resetPage()
-                }
+                session.toggleFullScreen()
             }
             optionsMenu
-            iconButton("xmark", help: "Close (Space or Escape)") { session.close() }
+            ToolbarButton(symbol: "xmark", title: "Close", shortcut: "Space", tipAlignment: .topTrailing) {
+                session.close()
+            }
         }
     }
 
+    private var undoTitle: String {
+        let name = session.undoManager.undoActionName
+        return name.isEmpty ? "Undo" : "Undo \(name)"
+    }
+
+    private var separator: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.12))
+            .frame(width: 1, height: 16)
+            .padding(.horizontal, 3)
+    }
+
     private var compareButton: some View {
-        Image(systemName: session.showingOriginal ? "eye.fill" : "eye")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Color.white.opacity(0.92))
-            .frame(width: 28, height: 28)
-            .background(Color.white.opacity(session.showingOriginal ? 0.18 : 0.08), in: Circle())
-            .contentShape(Circle())
+        ToolbarGlyph(symbol: "square.split.2x1", on: session.showingOriginal)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -195,60 +182,49 @@ struct GradeOverlay: View {
                         compareDownAt = nil
                     }
             )
-            .help("Hold to see the original. Click to keep it (\\).")
+            .modifier(HoverTip(title: "Before & After. Hold to peek, click to keep", shortcut: "\\"))
+            .accessibilityLabel("Before and After")
     }
 
     private var optionsMenu: some View {
         Menu {
+            Button("Export a Copy…") { session.save() }
+                .keyboardShortcut("s")
+                .disabled(!session.isDirty || session.isSaving)
+            Button("Copy Image") { session.copyImage() }
+                .keyboardShortcut("c")
+            Divider()
             Button("Copy Adjustments") { session.copyAdjustments() }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
             Button("Paste Adjustments") { session.pasteAdjustments() }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
                 .disabled(!session.canPaste)
             Divider()
-            Button("Export a Copy") { session.save() }
-                .disabled(!session.isDirty || session.isSaving)
-            Button("Revert All") { session.resetAll() }
-            Button("Copy Image") { session.copyImage() }
+            Toggle("Show Clipping", isOn: Binding(
+                get: { session.showClipping },
+                set: { _ in session.toggleClipping() }
+            ))
+            .keyboardShortcut("j", modifiers: [])
+            Divider()
+            Button("Revert \(session.page.title)") { session.resetPage() }
+                .disabled(session.settings.isPageNeutral(session.page))
+            Button("Revert to Original") { session.resetAll() }
+                .disabled(!session.isDirty)
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.92))
-                .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.08), in: Circle())
+            ToolbarGlyph(symbol: "ellipsis")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Copy and paste the grade")
+        .modifier(HoverTip(title: "More", shortcut: nil, alignment: .topTrailing))
+        .accessibilityLabel("More")
     }
 
     private var shelf: some View {
         Group {
-            if session.selecting {
-                VStack(alignment: .leading, spacing: 8) {
-                    SelectionShelf(
-                        brush: $session.brush,
-                        erasing: $session.erasing,
-                        reach: Binding(
-                            get: { CGFloat(session.settings.selectionReach) },
-                            set: { session.previewReach(Double($0)) }
-                        ),
-                        canApply: !session.strokes.isEmpty,
-                        applying: session.applyingSelection,
-                        onApply: { session.applySelection() },
-                        onClear: { session.strokes = [] },
-                        onReachEdit: { editing in
-                            if editing { session.beginReach() } else { session.endReach() }
-                        }
-                    )
-                    if session.settings.removeBackground {
-                        Button("Restore background") { session.restoreBackground() }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.55))
-                            .padding(.horizontal, 12)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            if session.drawing {
+                MarkupShelf(session: session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else if session.cropping {
                 CropShelf(
                     edit: cropBinding,
@@ -260,16 +236,16 @@ struct GradeOverlay: View {
                 gradeShelf
             }
         }
-        .background(session.cropping || session.selecting ? Color.white.opacity(0.045) : Color.clear)
+        .background(session.cropping || session.drawing ? Color.white.opacity(0.045) : Color.clear)
         .overlay(alignment: .leading) {
-            if session.cropping || session.selecting {
+            if session.cropping || session.drawing {
                 Rectangle()
                     .fill(Color.white.opacity(0.08))
                     .frame(width: 1)
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.cropping)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.selecting)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.drawing)
     }
 
     private var cropBinding: Binding<CropEdit> {
@@ -322,7 +298,7 @@ struct GradeOverlay: View {
                 .onChange(of: geo.size) { _, _ in session.rememberCropView(fitted) }
                 .contextMenu { Button("Copy") { session.copyImage() } }
             }
-        } else if session.selecting, let image = session.displayedImage {
+        } else if session.drawing, let image = session.displayedImage {
             GeometryReader { geo in
                 let aspect = max(image.size.width / max(image.size.height, 1), 0.01)
                 let fitted = fittedSize(aspect: aspect, maxWidth: geo.size.width - 40, maxHeight: geo.size.height - 52)
@@ -332,7 +308,7 @@ struct GradeOverlay: View {
                         .interpolation(.high)
                         .frame(width: fitted.width, height: fitted.height)
                         .allowsHitTesting(false)
-                    SelectionCanvas(strokes: $session.strokes, brush: session.brush, erasing: session.erasing)
+                    MarkupCanvas(session: session)
                         .frame(width: fitted.width, height: fitted.height)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
@@ -343,6 +319,11 @@ struct GradeOverlay: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
+                .overlay {
+                    if !session.showingOriginal && !session.settings.markup.isEmpty {
+                        MarkupLayer(strokes: session.settings.markup)
+                    }
+                }
                 .padding(.horizontal, 20)
                 .padding(.top, 36)
                 .padding(.bottom, 16)
@@ -542,42 +523,6 @@ struct GradeOverlay: View {
                 .background(.black.opacity(0.45), in: Circle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func iconButton(
-        _ symbol: String,
-        on: Bool = false,
-        enabled: Bool = true,
-        help: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(enabled ? Color.white.opacity(0.92) : Color.white.opacity(0.28))
-                .frame(width: 28, height: 28)
-                .background(Color.white.opacity(on ? 0.18 : 0.08), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(help)
-    }
-}
-
-private struct Checkerboard: View {
-    var body: some View {
-        Canvas { context, size in
-            let cell: CGFloat = 14
-            let cols = Int(size.width / cell) + 1
-            let rows = Int(size.height / cell) + 1
-            for row in 0..<rows {
-                for col in 0..<cols {
-                    let light = (row + col).isMultiple(of: 2)
-                    let rect = CGRect(x: CGFloat(col) * cell, y: CGFloat(row) * cell, width: cell, height: cell)
-                    context.fill(Path(rect), with: .color(Color(white: light ? 0.22 : 0.14)))
-                }
-            }
-        }
     }
 }
 
