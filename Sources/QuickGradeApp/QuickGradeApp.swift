@@ -16,12 +16,17 @@ final class AppModel {
     /// A switch left on for an older build of QuickGrade looks on in System Settings
     /// but no longer matches this app, so macOS keeps saying no. Clearing QuickGrade's own
     /// entry first means the prompt adds a fresh one, and one flip of the switch works.
+    /// That clearing happens once per build: doing it again would delete the fresh entry
+    /// while the person is looking for it in System Settings.
     func requestAccess() {
         guard !AXIsProcessTrusted() else {
             refresh()
             return
         }
-        if let id = Bundle.main.bundleIdentifier {
+        let defaults = UserDefaults.standard
+        let build = Self.buildStamp
+        if let id = Bundle.main.bundleIdentifier, defaults.string(forKey: "accessResetBuild") != build {
+            defaults.set(build, forKey: "accessResetBuild")
             let reset = Process()
             reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
             reset.arguments = ["reset", "Accessibility", id]
@@ -34,6 +39,15 @@ final class AppModel {
         AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         SpaceMonitor.shared.start()
         refresh()
+    }
+
+    /// Changes whenever the app binary changes, which is when macOS forgets the switch.
+    private static var buildStamp: String {
+        let path = Bundle.main.executablePath ?? ""
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+        let date = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(size)-\(Int(date))"
     }
 
     func toggleLogin() {
