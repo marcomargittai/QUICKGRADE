@@ -2,11 +2,13 @@ import XCTest
 @testable import QuickGradeCore
 
 final class ShelfSelectionTests: XCTestCase {
-    func testShelfNameKeepsJPEGAndPNG() {
+    func testShelfNameKeepsJPEGPNGAndHEIC() {
         XCTAssertEqual(ImageKind.shelfSelectionName("photo.jpg"), "photo.jpg")
         XCTAssertEqual(ImageKind.shelfSelectionName("photo.JPEG"), "photo.JPEG")
         XCTAssertEqual(ImageKind.shelfSelectionName("photo.jfif"), "photo.jfif")
         XCTAssertEqual(ImageKind.shelfSelectionName("photo.png"), "photo.png")
+        XCTAssertEqual(ImageKind.shelfSelectionName("IMG_0042.HEIC"), "IMG_0042.HEIC")
+        XCTAssertEqual(ImageKind.shelfSelectionName("photo.heif"), "photo.heif")
     }
 
     func testBakSuffixMapsBackToShelfFile() {
@@ -17,11 +19,11 @@ final class ShelfSelectionTests: XCTestCase {
         XCTAssertNil(ImageKind.shelfSelectionName("photo"))
     }
 
-    func testWriteExtensionDoesNotTurnJPEGIntoPNG() {
+    func testWriteExtensionKeepsEachFormat() {
         XCTAssertEqual(ImageKind.shelfWriteExtension("jpeg"), "jpeg")
         XCTAssertEqual(ImageKind.shelfWriteExtension(".JPG"), "jpg")
         XCTAssertEqual(ImageKind.shelfWriteExtension("png"), "png")
-        XCTAssertNil(ImageKind.shelfWriteExtension("heic"))
+        XCTAssertEqual(ImageKind.shelfWriteExtension("HEIC"), "heic")
         XCTAssertNil(ImageKind.shelfWriteExtension(""))
     }
 

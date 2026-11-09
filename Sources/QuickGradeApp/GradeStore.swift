@@ -77,7 +77,7 @@ enum GradeStore {
 
     /// Replaces the bytes at `file` so Finder rebuilds the thumbnail.
     /// The path and extension stay put. A sibling `*.quickgrade-bak` rename
-    /// makes Finder follow the old inode and stop treating the selection as a JPEG or PNG.
+    /// makes Finder follow the old inode and stop treating the selection as a photo.
     static func swapIn(_ temp: URL, replacing file: URL) throws {
         let file = ImageKind.posixFileURL(file)
         let keptExtension = file.pathExtension

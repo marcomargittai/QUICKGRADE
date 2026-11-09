@@ -133,7 +133,7 @@ enum FinderSelection {
         return .other
     }
 
-    /// JPEG or PNG that is still on disk. A bak alias maps back to that file.
+    /// JPEG, PNG or HEIC that is still on disk. A bak alias maps back to that file.
     private static func shelfURL(_ url: URL) -> URL? {
         let pathURL = ImageKind.posixFileURL(url)
         if ImageKind.opensInShelf(pathURL), FileManager.default.fileExists(atPath: pathURL.path) {
@@ -324,7 +324,7 @@ enum FinderSelection {
 
     /// Keeps a real file URL. A file-reference URL is turned into a path when it
     /// still resolves. A missing file, or a `*.quickgrade-bak` name, falls through
-    /// to the JPEG or PNG that is actually in the folder.
+    /// to the photo that is actually in the folder.
     private static func usableURL(_ url: URL, folder: URL?) -> URL? {
         let pathURL = ImageKind.posixFileURL(url)
         if FileManager.default.fileExists(atPath: pathURL.path) {

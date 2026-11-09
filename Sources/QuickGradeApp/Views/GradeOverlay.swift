@@ -45,6 +45,19 @@ struct GradeOverlay: View {
         ZStack {
             Color.black.opacity(session.isFullScreen ? 1 : 0.72)
             photo
+            if !session.cropping && !session.drawing {
+                // Press and hold the photo to see the original, like holding the compare button.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if session.isDirty && !session.originalHeld { session.setCompareHeld(true) }
+                            }
+                            .onEnded { _ in session.setCompareHeld(false) }
+                    )
+                    .contextMenu { Button("Copy") { session.copyImage() } }
+            }
 
             VStack {
                 Spacer()

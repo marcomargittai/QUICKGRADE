@@ -1,6 +1,6 @@
 # QuickGrade
 
-Select a JPEG or PNG in Finder, press Space, and grade it right there instead of opening Quick Look. Light, white balance, HSL, curves, filters, crop, drawing and sharing, with every slider already open.
+Select a JPEG, PNG or HEIC photo in Finder, press Space, and grade it right there instead of opening Quick Look. Light, white balance, HSL, curves, filters, crop, drawing and sharing, with every slider already open.
 
 Needs macOS 14 Sonoma or newer on an Apple Silicon Mac (M1 or later).
 
@@ -9,7 +9,7 @@ Needs macOS 14 Sonoma or newer on an Apple Silicon Mac (M1 or later).
 Copy this prompt into Claude Code, Codex, Cursor or any agent that can run commands on your Mac:
 
 ```text
-Install QuickGrade on my Mac. It is a free Mac app: when I select a JPEG or PNG in Finder and press Space, it opens the photo with editing sliders instead of Quick Look.
+Install QuickGrade on my Mac. It is a free Mac app: when I select a JPEG, PNG or HEIC photo in Finder and press Space, it opens the photo with editing sliders instead of Quick Look.
 
 1. Check that this Mac has Apple Silicon and macOS 14 or newer: `uname -m` must print arm64 and the first number of `sw_vers -productVersion` must be 14 or higher. If not, stop and tell me QuickGrade won't run here.
 2. Make a new temporary folder, download https://github.com/marcomargittai/QUICKGRADE/releases/latest/download/QuickGrade.zip into it with curl -fL, and unzip it there with `ditto -x -k QuickGrade.zip .`

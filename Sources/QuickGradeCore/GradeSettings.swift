@@ -533,9 +533,9 @@ public enum ImageKind {
         return false
     }
 
-    public static let shelfExtensions: Set<String> = ["jpg", "jpeg", "jpe", "jfif", "png"]
+    public static let shelfExtensions: Set<String> = ["jpg", "jpeg", "jpe", "jfif", "png", "heic", "heif"]
 
-    /// Space opens QuickGrade only for JPEG and PNG. Every other file keeps Quick Look.
+    /// Space opens QuickGrade for JPEG, PNG and HEIC. Every other file keeps Quick Look.
     public static func opensInShelf(_ url: URL) -> Bool {
         shelfExtensions.contains(url.pathExtension.lowercased())
     }
@@ -547,7 +547,7 @@ public enum ImageKind {
         return pathURL.standardizedFileURL.resolvingSymlinksInPath()
     }
 
-    /// Name of the JPEG or PNG the user selected. Finder can report
+    /// Name of the JPEG, PNG or HEIC the user selected. Finder can report
     /// `photo.jpg.quickgrade-bak` after a thumbnail replace. That suffix is removed.
     /// Returns nil when the name is not a shelf photo.
     public static func shelfSelectionName(_ name: String) -> String? {
@@ -570,7 +570,7 @@ public enum ImageKind {
         return candidate
     }
 
-    /// Extension to use when rewriting the selected file. JPEG stays JPEG, PNG stays PNG.
+    /// Extension to use when rewriting the selected file. Each format stays itself: HEIC stays HEIC.
     public static func shelfWriteExtension(_ ext: String) -> String? {
         var value = ext.lowercased()
         if value.hasPrefix(".") { value.removeFirst() }

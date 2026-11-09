@@ -920,7 +920,7 @@ final class GradeController: NSObject, NSWindowDelegate, NSSharingServicePickerD
     /// Arrows move Finder's own selection, then the shelf shows what Finder picked.
     /// The order and layout are always Finder's: its sort, its view, its columns.
     /// List and column view treat left and right as up and down, since those keys
-    /// fold folders there. Anything that isn't a JPEG or PNG is stepped over.
+    /// fold folders there. Anything that isn't a JPEG, PNG or HEIC is stepped over.
     private func step(_ arrow: Arrow, hops: Int = 0) {
         guard !stepping || hops > 0 else { return }
         guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first,
