@@ -62,13 +62,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 self?.model.requestAccess()
             }
-            Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
-                if AXIsProcessTrusted() {
-                    timer.invalidate()
-                    SpaceMonitor.shared.start()
-                    self.model.refresh()
-                }
+        }
+        // Without Accessibility, Space never reaches QuickGrade and nothing happens at all.
+        // Keep checking, so the guide shows whenever the switch is off and leaves once it's on.
+        AccessGuide.shared.model = model
+        AccessGuide.shared.update()
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            let trusted = AXIsProcessTrusted()
+            if trusted != self.model.trusted {
+                self.model.refresh()
+                if trusted { SpaceMonitor.shared.start() }
             }
+            AccessGuide.shared.update()
         }
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         if let path = arguments.first {
@@ -115,7 +120,10 @@ struct QuickGradeApp: App {
         MenuBarExtra {
             MenuContent(model: delegate.model)
         } label: {
-            if let mark = MenuMark.image {
+            if !delegate.model.trusted {
+                // A warning in the menu bar while Space can't work.
+                Image(systemName: "exclamationmark.triangle")
+            } else if let mark = MenuMark.image {
                 Image(nsImage: mark)
             } else {
                 Image(systemName: "camera.filters")
@@ -134,7 +142,11 @@ struct MenuContent: View {
         if model.trusted {
             Label("Accessibility is on", systemImage: "checkmark.circle")
         } else {
-            Button("Enable Accessibility…") { model.requestAccess() }
+            Text("Space won't open photos until Accessibility is on")
+            Button("Turn On Accessibility…") {
+                model.requestAccess()
+                AccessGuide.openSettings()
+            }
         }
         Button(model.opensAtLogin ? "Open at Login: On" : "Open at Login") {
             model.toggleLogin()
@@ -153,4 +165,90 @@ private enum MenuMark {
         image.size = NSSize(width: 18, height: 18)
         return image
     }()
+}
+
+/// A small window that says why Space does nothing yet and opens the right settings pane.
+/// It shows while Accessibility is off and closes itself once the switch is on.
+@MainActor
+final class AccessGuide {
+    static let shared = AccessGuide()
+    var model: AppModel?
+    private var window: NSPanel?
+    private var dismissedUntil = Date.distantPast
+
+    static func openSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        NSWorkspace.shared.open(url)
+    }
+
+    func update() {
+        if AXIsProcessTrusted() {
+            window?.orderOut(nil)
+            return
+        }
+        guard Date() > dismissedUntil else { return }
+        let panel = window ?? makeWindow()
+        if !panel.isVisible {
+            panel.center()
+            panel.orderFrontRegardless()
+        }
+    }
+
+    private func makeWindow() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 210),
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.level = .floating
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.contentView = NSHostingView(rootView: AccessGuideView(
+            onOpen: {
+                self.model?.requestAccess()
+                AccessGuide.openSettings()
+            },
+            onLater: {
+                // Out of the way for a while. It comes back, since nothing works without it.
+                self.dismissedUntil = Date().addingTimeInterval(10 * 60)
+                self.window?.orderOut(nil)
+            }
+        ))
+        window = panel
+        return panel
+    }
+}
+
+private struct AccessGuideView: View {
+    let onOpen: () -> Void
+    let onLater: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 40, height: 40)
+                Text("Turn on Accessibility for QuickGrade")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            Text("Until it's on, pressing Space in Finder can't open your photos. In the list, switch QuickGrade on. If it already looks on, remove it with the minus button and add it again: macOS forgets the switch after an update.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Later", action: onLater)
+                Button("Open Settings", action: onOpen)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .padding(.top, 8)
+        .frame(width: 380)
+    }
 }

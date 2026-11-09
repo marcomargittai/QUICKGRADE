@@ -139,6 +139,9 @@ final class GradeController: NSObject, NSWindowDelegate, NSSharingServicePickerD
     }
 
     func open(urls selected: [URL], keepGrade: Bool = false) {
+        // Each open starts clean, so a share or rename that never reported back can't block the next one.
+        if sharing { endSharing() }
+        stepping = false
         dismissQuickLookSoon()
         let selected = selected.map(ImageKind.posixFileURL)
         let photos = selected.filter(ImageKind.isPhoto)
@@ -195,6 +198,11 @@ final class GradeController: NSObject, NSWindowDelegate, NSSharingServicePickerD
         panel.orderOut(nil)
         panel.alphaValue = 1
         if session.isFullScreen { leaveFullScreenChrome(panel) }
+        session.renaming = false
+        sharing = false
+        stepping = false
+        // A share can leave the shelf at normal level. Back above Finder for the next open.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 2)
         releasePreview()
         closing = false
         guard restoreSelection, let url else { return }
